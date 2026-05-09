@@ -1,0 +1,56 @@
+const fs = require('fs');
+const path = require('path');
+
+function walk(dir) {
+  let results = [];
+  const list = fs.readdirSync(dir);
+  list.forEach(file => {
+    file = path.join(dir, file);
+    const stat = fs.statSync(file);
+    if (stat && stat.isDirectory()) {
+      results = results.concat(walk(file));
+    } else if (file.endsWith('.tsx') && !file.includes('node_modules')) {
+      results.push(file);
+    }
+  });
+  return results;
+}
+
+const files = walk('./src/components');
+let total = 0;
+
+files.forEach(f => {
+  let content = fs.readFileSync(f, 'utf8');
+  let original = content;
+  
+  // Revert object properties
+  content = content.replace(/onChange=\{\(e\)\s*=>\s*set([A-Za-z0-9_]+)\(\{\s*\.\.\.([A-Za-z0-9_]+),\s*([A-Za-z0-9_]+):\s*e\.target\.value\.toUpperCase\(\)\s*\}\)\}/g, (match, p1, p2, p3) => {
+    if(p3.toLowerCase().endsWith('_id') || p3.toLowerCase() === 'id' || p3.toLowerCase().includes('date')) {
+      return `onChange={(e) => set${p1}({...${p2}, ${p3}: e.target.value})}`;
+    }
+    return match;
+  });
+  
+  // Revert direct setters
+  content = content.replace(/onChange=\{\(e\)\s*=>\s*set([A-Za-z0-9_]+)\(e\.target\.value\.toUpperCase\(\)\)\}/g, (match, p1) => {
+    if(p1.toLowerCase().includes('id') || p1.toLowerCase().includes('date') || p1.toLowerCase().includes('filterprovider') || p1.toLowerCase().includes('filterproject') || p1.toLowerCase().includes('filterstatus')) {
+      return `onChange={(e) => set${p1}(e.target.value)}`;
+    }
+    return match;
+  });
+  
+  // Revert array sets
+  content = content.replace(/([a-zA-Z0-9_]+)\[index\]\.([a-zA-Z0-9_]+)\s*=\s*e\.target\.value\.toUpperCase\(\);/g, (match, obj, prop) => {
+    if(prop.toLowerCase().endsWith('_id') || prop.toLowerCase() === 'id' || prop.toLowerCase().includes('date')) {
+      return `${obj}[index].${prop} = e.target.value;`;
+    }
+    return match;
+  });
+  
+  if (original !== content) {
+    fs.writeFileSync(f, content);
+    total++;
+  }
+});
+
+console.log('Reverted toUpperCase on UUID/Date fields in', total, 'files.');
