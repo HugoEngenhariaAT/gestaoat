@@ -31,6 +31,15 @@ export async function seedExampleData() {
       provider: 'Portobello', 
       stock_quantity: 200, 
       min_stock: 50 
+    },
+    { 
+      name: 'Fio de Cobre', 
+      category: 'Elétrica', 
+      unit: 'UN', 
+      cost: 150.00, 
+      provider: 'Geral', 
+      stock_quantity: 1, 
+      min_stock: 0 
     }
   ]).select();
 
