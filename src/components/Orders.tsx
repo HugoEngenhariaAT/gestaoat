@@ -19,15 +19,19 @@ import {
   Info,
   PackageCheck,
   AlertTriangle,
-  Package
+  Package,
+  FileSpreadsheet
 } from 'lucide-react';
 import { getSupabase } from '../lib/supabase';
 import { Material, Order, Profile } from '../types';
 import { cn } from '../lib/utils';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isWithinInterval, startOfMonth, endOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useAuth } from '../lib/AuthContext';
 import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 export default function Orders() {
   const { profile } = useAuth();
@@ -44,6 +48,10 @@ export default function Orders() {
   const [orderToCancel, setOrderToCancel] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [startDate, setStartDate] = useState<string>(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [endDate, setEndDate] = useState<string>(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
+  const [projectFilter, setProjectFilter] = useState<string>('ALL');
+  const [supplierFilter, setSupplierFilter] = useState<string>('ALL');
 
   const [newOrder, setNewOrder] = useState({
     items: [{ material_id: '', quantity: 0 }],
@@ -313,6 +321,132 @@ export default function Orders() {
     }
   };
 
+  const exportToExcel = () => {
+    try {
+      const filteredOrders = orders.filter(order => {
+        const orderDate = parseISO(order.created_at);
+        const isWithinDate = isWithinInterval(orderDate, {
+          start: parseISO(startDate),
+          end: parseISO(endDate + 'T23:59:59')
+        });
+        const matchesStatus = statusFilter === 'ALL' || order.status === statusFilter;
+        const matchesProject = projectFilter === 'ALL' || order.project === projectFilter;
+        
+        const currentSupplier = order.delivery_type === 'PICKUP' ? order.pickup_info : order.supplier;
+        const matchesSupplier = supplierFilter === 'ALL' || currentSupplier === supplierFilter;
+
+        return isWithinDate && matchesStatus && matchesProject && matchesSupplier;
+      });
+
+      if (filteredOrders.length === 0) {
+        toast.error('Nenhum pedido encontrado com os filtros selecionados.');
+        return;
+      }
+
+      const wb = XLSX.utils.book_new();
+      const wsData = filteredOrders.map(o => ({
+        'Data Solicitação': safeFormatDate(o.created_at, "dd/MM/yyyy HH:mm"),
+        'Material': o.material?.name || '---',
+        'Quantidade': o.quantity,
+        'Unidade': o.material?.unit || '---',
+        'Fornecedor / Local Retirada': o.delivery_type === 'PICKUP' ? (o.pickup_info || '---') : (o.supplier || '---'),
+        'Status': o.status === 'PENDING' ? 'Pendente' :
+                  o.status === 'APPROVED' ? 'Comprado' :
+                  o.status === 'AWAITING_PICKUP' ? 'Aguardando Retirada' :
+                  o.status === 'PICKED_UP' ? 'Em Trânsito' :
+                  o.status === 'DELIVERED' ? 'Entregue' :
+                  o.status === 'RECEIVED' ? 'Recebido' : 'Cancelado',
+        'Solicitante': o.requested_by,
+        'Empreendimento': o.project || 'Estoque',
+        'Apartamento': o.apartment || '---',
+        'Descrição': o.service_description || '---',
+        'Observações': o.observation || '---',
+        'Previsão Entrega': safeFormatDate(o.expected_delivery, 'dd/MM/yyyy'),
+        'Recebido Por': o.received_by || '---'
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(wsData);
+      XLSX.utils.book_append_sheet(wb, ws, "Pedidos");
+      XLSX.writeFile(wb, `Relatorio_Pedidos_${startDate}_a_${endDate}.xlsx`);
+      toast.success('Relatório de pedidos exportado com sucesso!');
+    } catch (err) {
+      console.error('Erro ao exportar Excel:', err);
+      toast.error('Erro ao exportar relatório.');
+    }
+  };
+
+  const exportToPDF = () => {
+    try {
+      const filteredOrders = orders.filter(order => {
+        const orderDate = parseISO(order.created_at);
+        const isWithinDate = isWithinInterval(orderDate, {
+          start: parseISO(startDate),
+          end: parseISO(endDate + 'T23:59:59')
+        });
+        const matchesStatus = statusFilter === 'ALL' || order.status === statusFilter;
+        const matchesProject = projectFilter === 'ALL' || order.project === projectFilter;
+        
+        const currentSupplier = order.delivery_type === 'PICKUP' ? order.pickup_info : order.supplier;
+        const matchesSupplier = supplierFilter === 'ALL' || currentSupplier === supplierFilter;
+
+        return isWithinDate && matchesStatus && matchesProject && matchesSupplier;
+      });
+
+      if (filteredOrders.length === 0) {
+        toast.error('Nenhum pedido encontrado com os filtros selecionados.');
+        return;
+      }
+
+      const doc = new jsPDF('l', 'mm', 'a4');
+      
+      // Título
+      doc.setFontSize(22);
+      doc.setTextColor(20, 20, 20);
+      doc.text("Relatório Executivo de Pedidos", 14, 22);
+      
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 30);
+      doc.text(`Período: ${format(parseISO(startDate), 'dd/MM/yyyy')} até ${format(parseISO(endDate), 'dd/MM/yyyy')}`, 14, 35);
+
+      const tableBody = filteredOrders.map(o => [
+        safeFormatDate(o.created_at, 'dd/MM/yy'),
+        o.material?.name || '---',
+        `${o.quantity} ${o.material?.unit || ''}`,
+        o.delivery_type === 'PICKUP' ? (o.pickup_info || '---') : (o.supplier || '---'),
+        o.status === 'PENDING' ? 'Pendente' :
+        o.status === 'APPROVED' ? 'Comprado' :
+        o.status === 'AWAITING_PICKUP' ? 'Aguardando Retirada' :
+        o.status === 'PICKED_UP' ? 'Em Trânsito' :
+        o.status === 'DELIVERED' ? 'Entregue' :
+        o.status === 'RECEIVED' ? 'Recebido' : 'Cancelado',
+        o.project || 'Estoque',
+        o.service_description || '---',
+        o.requested_by
+      ]);
+
+      autoTable(doc, {
+        startY: 45,
+        head: [['Data', 'Material', 'Qtd', 'Fornecedor', 'Status', 'Obra', 'Descrição/Justificativa', 'Solicitante']],
+        body: tableBody,
+        theme: 'grid',
+        headStyles: { fillColor: [20, 20, 20], fontSize: 9, fontStyle: 'bold' },
+        styles: { fontSize: 8, cellPadding: 3 },
+        columnStyles: {
+          3: { cellWidth: 35 }, // Fornecedor
+          6: { cellWidth: 60 }, // Descrição
+        },
+        alternateRowStyles: { fillColor: [245, 245, 245] }
+      });
+
+      doc.save(`Relatorio_Executivo_Pedidos_${startDate}_a_${endDate}.pdf`);
+      toast.success('Relatório executivo PDF gerado com sucesso!');
+    } catch (err) {
+      console.error('Erro ao exportar PDF:', err);
+      toast.error('Erro ao gerar PDF.');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -321,13 +455,83 @@ export default function Orders() {
           <h2 className="text-2xl md:text-3xl font-bold text-neutral-900 italic serif">Pedidos de Compra</h2>
           <p className="text-sm text-neutral-500">Solicitação e acompanhamento de novos materiais</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="hidden md:flex items-center justify-center gap-2 px-6 py-3 bg-neutral-900 text-white rounded-2xl font-bold hover:bg-neutral-800 transition-all shadow-lg shadow-neutral-200"
-        >
-          <Plus size={20} />
-          Novo Pedido
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {isAdmin && (
+            <>
+              <button 
+                onClick={exportToExcel}
+                className="flex items-center justify-center gap-2 px-6 py-3 bg-white border border-neutral-200 text-neutral-900 rounded-2xl font-bold hover:bg-neutral-50 transition-all shadow-sm"
+                title="Excel Simples"
+              >
+                <FileSpreadsheet size={20} />
+                Excel
+              </button>
+              <button 
+                onClick={exportToPDF}
+                className="flex items-center justify-center gap-2 px-6 py-3 bg-neutral-100 text-neutral-900 border border-neutral-200 rounded-2xl font-bold hover:bg-neutral-200 transition-all shadow-sm"
+                title="PDF Executivo"
+              >
+                <FileText size={20} />
+                PDF Executivo
+              </button>
+            </>
+          )}
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="hidden md:flex items-center justify-center gap-2 px-6 py-3 bg-neutral-900 text-white rounded-2xl font-bold hover:bg-neutral-800 transition-all shadow-lg shadow-neutral-200"
+          >
+            <Plus size={20} />
+            Novo Pedido
+          </button>
+        </div>
+      </div>
+
+      {/* Date Filters */}
+      <div className="bg-white p-4 rounded-3xl border border-neutral-200 shadow-sm flex flex-col md:flex-row items-end gap-4">
+        <div className="flex-1 w-full">
+          <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1 ml-1">Início do Período</label>
+          <input 
+            type="date" 
+            className="w-full px-4 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+        </div>
+        <div className="flex-1 w-full">
+          <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1 ml-1">Fim do Período</label>
+          <input 
+            type="date" 
+            className="w-full px-4 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
+        </div>
+        <div className="flex-1 w-full">
+          <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1 ml-1">Obra</label>
+          <select 
+            className="w-full px-4 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+            value={projectFilter}
+            onChange={(e) => setProjectFilter(e.target.value)}
+          >
+            <option value="ALL">Todas</option>
+            {Array.from(new Set(orders.map(o => o.project).filter(Boolean))).sort().map(p => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 w-full">
+          <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1 ml-1">Fornecedor</label>
+          <select 
+            className="w-full px-4 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+            value={supplierFilter}
+            onChange={(e) => setSupplierFilter(e.target.value)}
+          >
+            <option value="ALL">Todos</option>
+            {Array.from(new Set(orders.map(o => o.delivery_type === 'PICKUP' ? o.pickup_info : o.supplier).filter(Boolean))).sort().map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Mobile Floating Action Button */}
@@ -374,7 +578,20 @@ export default function Orders() {
         ) : (
           <>
             {orders
-              .filter(order => statusFilter === 'ALL' || order.status === statusFilter)
+              .filter(order => {
+                const orderDate = parseISO(order.created_at);
+                const isWithinDate = isWithinInterval(orderDate, {
+                  start: parseISO(startDate),
+                  end: parseISO(endDate + 'T23:59:59')
+                });
+                const matchesStatus = statusFilter === 'ALL' || order.status === statusFilter;
+                const matchesProject = projectFilter === 'ALL' || order.project === projectFilter;
+                
+                const currentSupplier = order.delivery_type === 'PICKUP' ? order.pickup_info : order.supplier;
+                const matchesSupplier = supplierFilter === 'ALL' || currentSupplier === supplierFilter;
+
+                return isWithinDate && matchesStatus && matchesProject && matchesSupplier;
+              })
               .map((order) => (
               <OrderCard 
                 key={order.id} 

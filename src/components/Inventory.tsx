@@ -299,13 +299,15 @@ export default function Inventory() {
           <p className="text-sm text-neutral-500">Controle total de insumos e ferramentas</p>
         </div>
         <div className="flex overflow-x-auto pb-2 md:pb-0 gap-2 no-scrollbar shrink-0">
-          <button 
-            onClick={exportToExcel}
-            className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-neutral-200 text-neutral-900 rounded-xl text-xs font-bold hover:bg-neutral-50 transition-all shadow-sm whitespace-nowrap"
-          >
-            <FileSpreadsheet size={18} />
-            Exportar
-          </button>
+          {isAdmin && (
+            <button 
+              onClick={exportToExcel}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-neutral-200 text-neutral-900 rounded-xl text-xs font-bold hover:bg-neutral-50 transition-all shadow-sm whitespace-nowrap"
+            >
+              <FileSpreadsheet size={18} />
+              Exportar
+            </button>
+          )}
           <button 
             onClick={() => {
               setSelectedMaterial(null);

@@ -815,7 +815,7 @@ export default function Services() {
                       <Briefcase size={12} />
                       <span>{provider.service_type}</span>
                     </div>
-                    {!isForeman && provider.daily_rate !== undefined && provider.daily_rate > 0 && (
+                    {isAdmin && provider.daily_rate !== undefined && provider.daily_rate > 0 && (
                       <div className="flex items-center gap-2 text-xs font-bold text-green-600 mb-2">
                         <span>Diária: R$ {provider.daily_rate.toFixed(2)}</span>
                       </div>
@@ -1288,17 +1288,19 @@ export default function Services() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Valor da Diária (R$)</label>
-                  <input 
-                    type="number" 
-                    min="0"
-                    step="0.01"
-                    className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
-                    value={newProvider.daily_rate}
-                    onChange={(e) => setNewProvider({...newProvider, daily_rate: parseFloat(e.target.value) || 0})}
-                  />
-                </div>
+                {isAdmin && (
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Valor da Diária (R$)</label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      step="0.01"
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                      value={newProvider.daily_rate}
+                      onChange={(e) => setNewProvider({...newProvider, daily_rate: parseFloat(e.target.value) || 0})}
+                    />
+                  </div>
+                )}
 
                 <div className="pt-4">
                   <button type="submit" className="w-full py-4 bg-neutral-900 text-white rounded-2xl font-bold hover:bg-neutral-800 transition-all shadow-lg shadow-neutral-200">
@@ -1363,17 +1365,19 @@ export default function Services() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Valor da Diária (R$)</label>
-                  <input 
-                    type="number" 
-                    min="0"
-                    step="0.01"
-                    className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
-                    value={editingProvider.daily_rate || 0}
-                    onChange={(e) => setEditingProvider({...editingProvider, daily_rate: parseFloat(e.target.value) || 0})}
-                  />
-                </div>
+                {isAdmin && (
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Valor da Diária (R$)</label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      step="0.01"
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                      value={editingProvider.daily_rate || 0}
+                      onChange={(e) => setEditingProvider({...editingProvider, daily_rate: parseFloat(e.target.value) || 0})}
+                    />
+                  </div>
+                )}
 
                 <div className="flex items-center gap-2 pt-2">
                   <input 
