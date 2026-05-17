@@ -13,7 +13,8 @@ import {
   Building2,
   Lock,
   Edit2,
-  Trash2
+  Trash2,
+  Link
 } from 'lucide-react';
 import { getSupabase } from '../lib/supabase';
 import { Provider, ServiceRecord, Area, Project } from '../types';
@@ -59,7 +60,19 @@ export default function Services() {
     project: '',
     descriptions: [''],
     service_value: 0,
+    invoice_number: '',
+    document_type: 'NOTA_FISCAL',
+    document_number: '',
+    payment_method: '',
   });
+
+  const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkInvoiceNumber, setBulkInvoiceNumber] = useState('');
+  const [bulkDocumentType, setBulkDocumentType] = useState('NOTA_FISCAL');
+  const [bulkDocumentNumber, setBulkDocumentNumber] = useState('');
+  const [bulkPaymentMethod, setBulkPaymentMethod] = useState('');
+  const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
 
   const [newProvider, setNewProvider] = useState({
     name: '',
@@ -103,7 +116,9 @@ export default function Services() {
       }
     }
 
-    return matchesSearch && matchesProvider && matchesProject && matchesDate;
+    const matchesInvoiceNumber = !invoiceNumberFilter || r.invoice_number === invoiceNumberFilter;
+
+    return matchesSearch && matchesProvider && matchesProject && matchesDate && matchesInvoiceNumber;
   });
 
   const fetchData = async () => {
@@ -137,6 +152,9 @@ export default function Services() {
     e.preventDefault();
     
     try {
+      const docType = newRecord.document_type || 'NOTA_FISCAL';
+      const docNum = newRecord.document_number ? newRecord.document_number.toUpperCase().trim() : '';
+
       const { error } = await getSupabase()
         .from('service_records')
         .insert([{
@@ -148,7 +166,11 @@ export default function Services() {
           description: newRecord.descriptions[0] || '',
           descriptions: newRecord.descriptions,
           service_value: newRecord.quantity === 0 ? newRecord.service_value : 0,
-          created_by_id: profile?.id
+          created_by_id: profile?.id,
+          invoice_number: isAdmin ? (docNum || null) : null,
+          document_type: docType,
+          document_number: docNum || null,
+          payment_method: newRecord.payment_method || null,
         }]);
 
       if (error) {
@@ -165,6 +187,10 @@ export default function Services() {
               description: newRecord.descriptions[0] || '',
               descriptions: newRecord.descriptions,
               service_value: newRecord.quantity === 0 ? newRecord.service_value : 0,
+              invoice_number: isAdmin ? (docNum || null) : null,
+              document_type: docType,
+              document_number: docNum || null,
+              payment_method: newRecord.payment_method || null,
             }]);
           
           if (retryError) {
@@ -188,6 +214,10 @@ export default function Services() {
         project: '',
         descriptions: [''],
         service_value: 0,
+        invoice_number: '',
+        document_type: 'NOTA_FISCAL',
+        document_number: '',
+        payment_method: '',
       });
     } catch (err) {
       toast.error('Erro de configuração: ' + (err as Error).message);
@@ -266,6 +296,16 @@ export default function Services() {
         service_value: selectedRecord.quantity === 0 ? selectedRecord.service_value : 0,
       };
 
+      if (isAdmin) {
+        const docType = selectedRecord.document_type || 'NOTA_FISCAL';
+        const docNum = selectedRecord.document_number ? selectedRecord.document_number.toUpperCase().trim() : '';
+
+        updateData.invoice_number = docNum || null;
+        updateData.document_type = docType;
+        updateData.document_number = docNum || null;
+        updateData.payment_method = selectedRecord.payment_method || null;
+      }
+
       const { error } = await getSupabase()
         .from('service_records')
         .update(updateData)
@@ -281,6 +321,54 @@ export default function Services() {
       }
     } catch (err) {
       toast.error('Erro de configuração: ' + (err as Error).message);
+    }
+  };
+
+  const toggleRecordSelect = (id: string) => {
+    setSelectedRecordIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkUpdateServices = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedRecordIds.length === 0) return;
+
+    try {
+      const updates: any = {};
+      const docType = bulkDocumentType || 'NOTA_FISCAL';
+      const docNum = bulkDocumentNumber ? bulkDocumentNumber.toUpperCase().trim() : '';
+
+      if (docNum) {
+        updates.document_type = docType;
+        updates.document_number = docNum;
+        updates.invoice_number = docNum;
+      }
+
+      if (bulkPaymentMethod) {
+        updates.payment_method = bulkPaymentMethod;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        toast.error('Preencha pelo menos um campo para vincular.');
+        return;
+      }
+
+      const { error } = await getSupabase()
+        .from('service_records')
+        .update(updates)
+        .in('id', selectedRecordIds);
+
+      if (error) {
+        toast.error('Erro ao vincular serviços em massa: ' + error.message);
+      } else {
+        toast.success(`Vinculadas ${selectedRecordIds.length} diárias com sucesso!`);
+        setIsBulkModalOpen(false);
+        setSelectedRecordIds([]);
+        fetchData();
+      }
+    } catch (err) {
+      toast.error('Erro ao vincular serviços: ' + (err as Error).message);
     }
   };
 
@@ -303,6 +391,7 @@ export default function Services() {
       };
 
       if (isAdmin) {
+        row['Nota Fiscal (NF)'] = r.invoice_number || '---';
         row['Valor Serviço (R$)'] = r.quantity === 0 ? r.service_value || 0 : 0;
         row['Valor Total (R$)'] = r.quantity === 0 ? (r.service_value || 0) : (r.quantity * (r.provider?.daily_rate || 0));
       }
@@ -436,7 +525,10 @@ export default function Services() {
 
     const detailHead = ['Data', 'Prestador', 'Lançador', 'Área', 'Empreendimento', 'Qtd'];
     if (!isForeman) detailHead.push('Diária(R$)');
-    if (isAdmin) detailHead.push('Valor(R$)');
+    if (isAdmin) {
+      detailHead.push('NF');
+      detailHead.push('Valor(R$)');
+    }
     detailHead.push('Descrição');
 
     const tableData = sortedRecords.map(r => {
@@ -450,6 +542,7 @@ export default function Services() {
       ];
       if (!isForeman) row.push(`R$ ${(r.provider?.daily_rate || 0).toFixed(2)}`);
       if (isAdmin) {
+        row.push(r.invoice_number || '---');
         const valor = r.quantity === 0 ? (r.service_value || 0) : (r.quantity * (r.provider?.daily_rate || 0));
         row.push(`R$ ${valor.toFixed(2)}`);
       }
@@ -491,6 +584,8 @@ export default function Services() {
       toast.error('Erro ao excluir: ' + (err as Error).message);
     }
   };
+
+  const uniqueInvoiceNumbers = Array.from(new Set(records.map(r => r.invoice_number).filter(Boolean))).sort();
 
   return (
     <div className="space-y-6">
@@ -561,7 +656,7 @@ export default function Services() {
                 exit={{ height: 0, opacity: 0 }}
                 className="overflow-hidden"
               >
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 pt-4">
                   <div>
                     <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1">Prestador</label>
                     <select 
@@ -606,6 +701,21 @@ export default function Services() {
                       onChange={(e) => setEndDate(e.target.value)}
                     />
                   </div>
+                  {isAdmin && (
+                    <div className="hidden md:block">
+                      <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1">Filtro Nota (NF)</label>
+                      <select 
+                        className="w-full px-4 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                        value={invoiceNumberFilter}
+                        onChange={(e) => setInvoiceNumberFilter(e.target.value)}
+                      >
+                        <option value="">Todas</option>
+                        {uniqueInvoiceNumbers.map(inf => (
+                          <option key={inf} value={inf}>{inf}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
                 <div className="flex justify-end mt-4">
                   <button 
@@ -614,6 +724,7 @@ export default function Services() {
                       setFilterProject('');
                       setStartDate('');
                       setEndDate('');
+                      setInvoiceNumberFilter('');
                     }}
                     className="text-xs font-bold text-red-600 hover:underline"
                   >
@@ -688,6 +799,16 @@ export default function Services() {
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
+                          {isAdmin && (
+                            <div className="flex items-center justify-center mr-1">
+                              <input 
+                                type="checkbox"
+                                checked={selectedRecordIds.includes(record.id)}
+                                onChange={() => toggleRecordSelect(record.id)}
+                                className="w-5 h-5 rounded-lg border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer"
+                              />
+                            </div>
+                          )}
                           <div className="p-2 bg-neutral-100 rounded-xl text-neutral-600 group-hover:bg-neutral-900 group-hover:text-white transition-colors">
                             <Briefcase size={18} />
                           </div>
@@ -721,6 +842,11 @@ export default function Services() {
                           {isAdmin && record.quantity === 0 && record.service_value !== undefined && record.service_value > 0 && (
                             <span className="px-2 py-1 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded-lg uppercase tracking-widest">
                               R$ {record.service_value.toFixed(2)}
+                            </span>
+                          )}
+                          {isAdmin && record.invoice_number && (
+                            <span className="px-2 py-1 bg-neutral-100 text-neutral-600 text-[10px] font-bold rounded-lg uppercase tracking-widest">
+                              NF: {record.invoice_number}
                             </span>
                           )}
                         </div>
@@ -1039,6 +1165,50 @@ export default function Services() {
                   ))}
                 </div>
 
+                {isAdmin && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Tipo de Documento</label>
+                        <select
+                          className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                          value={newRecord.document_type}
+                          onChange={(e) => setNewRecord({...newRecord, document_type: e.target.value})}
+                        >
+                          <option value="NOTA_FISCAL">Nota Fiscal (NF)</option>
+                          <option value="REEMBOLSO">Reembolso</option>
+                          <option value="RECIBO">Recibo</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Número do Documento</label>
+                        <input 
+                          type="text" 
+                          placeholder={
+                            newRecord.document_type === 'NOTA_FISCAL' ? 'Ex: NF 98765' :
+                            newRecord.document_type === 'REEMBOLSO' ? 'Ex: REEMB 001' : 'Ex: REC 001'
+                          }
+                          className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                          value={newRecord.document_number}
+                          onChange={(e) => setNewRecord({...newRecord, document_number: e.target.value.toUpperCase()})}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Forma de Pagamento</label>
+                      <select
+                        className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                        value={newRecord.payment_method}
+                        onChange={(e) => setNewRecord({...newRecord, payment_method: e.target.value})}
+                      >
+                        <option value="">Selecione...</option>
+                        <option value="BOLETO">Boleto</option>
+                        <option value="DEPOSITO">Depósito</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
                 <div className="pt-4 shrink-0 pb-10 md:pb-0">
                   <button type="submit" className="w-full py-4 bg-neutral-900 text-white rounded-2xl font-bold hover:bg-neutral-800 transition-all shadow-lg shadow-neutral-200 flex items-center justify-center gap-2">
                     <CheckCircle2 size={20} />
@@ -1224,6 +1394,63 @@ export default function Services() {
                   ))}
                 </div>
 
+                {isAdmin && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Tipo de Documento</label>
+                        <select
+                          className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                          value={selectedRecord.document_type || 'NOTA_FISCAL'}
+                          onChange={(e) => {
+                            const newType = e.target.value;
+                            let newNum = '';
+                            if (newType === (selectedRecord.document_type || 'NOTA_FISCAL')) {
+                              newNum = selectedRecord.document_number || selectedRecord.invoice_number || '';
+                            } else {
+                              newNum = '';
+                            }
+                            setSelectedRecord({
+                              ...selectedRecord,
+                              document_type: newType,
+                              document_number: newNum
+                            });
+                          }}
+                        >
+                          <option value="NOTA_FISCAL">Nota Fiscal (NF)</option>
+                          <option value="REEMBOLSO">Reembolso</option>
+                          <option value="RECIBO">Recibo</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Número do Documento</label>
+                        <input 
+                          type="text" 
+                          placeholder={
+                            (selectedRecord.document_type || 'NOTA_FISCAL') === 'NOTA_FISCAL' ? 'Ex: NF 98765' :
+                            (selectedRecord.document_type || 'NOTA_FISCAL') === 'REEMBOLSO' ? 'Ex: REEMB 001' : 'Ex: REC 001'
+                          }
+                          className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                          value={selectedRecord.document_number || selectedRecord.invoice_number || ''}
+                          onChange={(e) => setSelectedRecord({...selectedRecord, document_number: e.target.value.toUpperCase()})}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Forma de Pagamento</label>
+                      <select
+                        className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                        value={selectedRecord.payment_method || ''}
+                        onChange={(e) => setSelectedRecord({...selectedRecord, payment_method: e.target.value})}
+                      >
+                        <option value="">Selecione...</option>
+                        <option value="BOLETO">Boleto</option>
+                        <option value="DEPOSITO">Depósito</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+
                 <div className="pt-4">
                   <button type="submit" className="w-full py-4 bg-neutral-900 text-white rounded-2xl font-bold hover:bg-neutral-800 transition-all shadow-lg shadow-neutral-200 flex items-center justify-center gap-2">
                     <CheckCircle2 size={20} />
@@ -1398,6 +1625,125 @@ export default function Services() {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Bulk Link Modal */}
+        {isBulkModalOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-neutral-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-neutral-900 italic serif">Vincular Documento</h3>
+                  <p className="text-xs text-neutral-500">{selectedRecordIds.length} serviços selecionados</p>
+                </div>
+                <button 
+                  onClick={() => setIsBulkModalOpen(false)} 
+                  className="p-2 hover:bg-neutral-100 rounded-full transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              <form onSubmit={handleBulkUpdateServices} className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Tipo de Documento</label>
+                    <select
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                      value={bulkDocumentType}
+                      onChange={(e) => setBulkDocumentType(e.target.value)}
+                    >
+                      <option value="NOTA_FISCAL">Nota Fiscal (NF)</option>
+                      <option value="REEMBOLSO">Reembolso</option>
+                      <option value="RECIBO">Recibo</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Número do Documento</label>
+                    <input 
+                      type="text" 
+                      placeholder={
+                        bulkDocumentType === 'NOTA_FISCAL' ? 'Ex: NF 98765' :
+                        bulkDocumentType === 'REEMBOLSO' ? 'Ex: REEMB 001' : 'Ex: REC 001'
+                      }
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                      value={bulkDocumentNumber}
+                      onChange={(e) => setBulkDocumentNumber(e.target.value.toUpperCase())}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Forma de Pagamento</label>
+                  <select
+                    className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                    value={bulkPaymentMethod}
+                    onChange={(e) => setBulkPaymentMethod(e.target.value)}
+                  >
+                    <option value="">Selecione...</option>
+                    <option value="BOLETO">Boleto</option>
+                    <option value="DEPOSITO">Depósito</option>
+                  </select>
+                </div>
+                <div className="pt-4 flex gap-3">
+                  <button 
+                    type="button"
+                    onClick={() => setIsBulkModalOpen(false)}
+                    className="flex-1 py-4 bg-neutral-100 text-neutral-600 rounded-2xl font-bold hover:bg-neutral-200 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="flex-1 py-4 bg-neutral-900 text-white rounded-2xl font-bold hover:bg-neutral-800 transition-all shadow-lg shadow-neutral-200 flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 size={20} />
+                    Confirmar Vínculo
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Floating Bottom Action Bar */}
+        {selectedRecordIds.length > 0 && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[50] w-[calc(100%-2rem)] max-w-xl">
+            <motion.div 
+              initial={{ y: 80, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 80, opacity: 0 }}
+              className="bg-black/95 backdrop-blur-md text-white px-6 py-4 rounded-[2rem] shadow-2xl flex items-center justify-between border border-neutral-800"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-neutral-800 flex items-center justify-center font-bold text-sm">
+                  {selectedRecordIds.length}
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-neutral-400">Selecionados</p>
+                  <p className="text-[10px] text-neutral-500">Pronto para vincular em massa</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setSelectedRecordIds([])}
+                  className="px-4 py-2 hover:bg-neutral-800 rounded-xl text-xs font-bold transition-all text-neutral-400 hover:text-white"
+                >
+                  Limpar
+                </button>
+                <button 
+                  onClick={() => setIsBulkModalOpen(true)}
+                  className="px-5 py-2.5 bg-white text-black hover:bg-neutral-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                >
+                  <Link size={14} />
+                  Vincular NF
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

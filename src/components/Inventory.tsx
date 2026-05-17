@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import SearchableMaterialSelect from './SearchableMaterialSelect';
 import { 
   Plus, 
   Search, 
@@ -972,23 +973,16 @@ export default function Inventory() {
 
                 <div>
                   <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Material</label>
-                  <select 
+                  <SearchableMaterialSelect
                     required
-                    className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                    materials={materials.filter(m => movementType === 'IN' || m.stock_quantity > 0)}
                     value={selectedMaterial?.id || ''}
-                    onChange={(e) => {
-                      const mat = materials.find(m => m.id === e.target.value);
+                    onChange={(id) => {
+                      const mat = materials.find(m => m.id === id);
                       setSelectedMaterial(mat || null);
                     }}
-                  >
-                    <option value="">Selecione o material...</option>
-                    {materials
-                      .filter(m => movementType === 'IN' || m.stock_quantity > 0)
-                      .map(m => (
-                        <option key={m.id} value={m.id}>{m.name} ({m.stock_quantity} {m.unit})</option>
-                      ))
-                    }
-                  </select>
+                    placeholder="Selecione o material..."
+                  />
                 </div>
 
                 <div>

@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS service_records (
   descriptions JSONB DEFAULT '[]'::jsonb,
   service_value DECIMAL(10,2) DEFAULT 0,
   created_by_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  invoice_number TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -106,6 +107,7 @@ ALTER TABLE service_records ADD COLUMN IF NOT EXISTS details JSONB DEFAULT '[]':
 ALTER TABLE service_records ADD COLUMN IF NOT EXISTS descriptions JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE service_records ADD COLUMN IF NOT EXISTS service_value DECIMAL(10,2) DEFAULT 0;
 ALTER TABLE service_records ADD COLUMN IF NOT EXISTS created_by_id UUID REFERENCES profiles(id) ON DELETE SET NULL;
+ALTER TABLE service_records ADD COLUMN IF NOT EXISTS invoice_number TEXT;
 -- Remove daily_rate as it's no longer used
 -- ALTER TABLE service_records DROP COLUMN IF EXISTS daily_rate;
 
@@ -164,6 +166,8 @@ CREATE TABLE IF NOT EXISTS orders (
   supplier TEXT,
   expected_delivery DATE,
   received_by TEXT,
+  purchase_order TEXT,
+  invoice_number TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -182,6 +186,8 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS pickup_by_name TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS supplier TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS expected_delivery DATE;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS received_by TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS purchase_order TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_number TEXT;
 
 -- Update status constraint to use APPROVED and AWAITING_PICKUP
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check;

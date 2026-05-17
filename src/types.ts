@@ -69,6 +69,10 @@ export interface ServiceRecord {
   details?: any[];
   service_value?: number;
   created_by_id: string | null;
+  invoice_number?: string | null;
+  document_type?: string | null;
+  document_number?: string | null;
+  payment_method?: string | null;
   created_at: string;
   provider?: Provider;
 }
@@ -97,6 +101,12 @@ export interface Order {
   supplier?: string;
   expected_delivery: string | null;
   received_by?: string;
+  purchase_order?: string | null;
+  invoice_number?: string | null;
+  order_value?: number | null;
+  document_type?: string | null;
+  document_number?: string | null;
+  payment_method?: string | null;
   created_at: string;
   material?: Material;
 }

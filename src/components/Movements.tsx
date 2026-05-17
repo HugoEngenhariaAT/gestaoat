@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import SearchableMaterialSelect from './SearchableMaterialSelect';
 import { 
   Plus, 
   ArrowUpRight, 
@@ -392,20 +393,13 @@ export default function Movements() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Material</label>
-                    <select 
+                    <SearchableMaterialSelect
                       required
-                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                      materials={materials.filter(m => newMovement.type === 'IN' || m.stock_quantity > 0)}
                       value={newMovement.material_id}
-                      onChange={(e) => setNewMovement({...newMovement, material_id: e.target.value})}
-                    >
-                      <option value="">Selecione o material...</option>
-                      {materials
-                        .filter(m => newMovement.type === 'IN' || m.stock_quantity > 0)
-                        .map(m => (
-                          <option key={m.id} value={m.id}>{m.name} ({m.stock_quantity} {m.unit})</option>
-                        ))
-                      }
-                    </select>
+                      onChange={(id) => setNewMovement({...newMovement, material_id: id})}
+                      placeholder="Selecione o material..."
+                    />
                   </div>
                   
                   <div className="grid grid-cols-1 gap-4">

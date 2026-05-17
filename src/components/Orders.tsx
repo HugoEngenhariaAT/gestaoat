@@ -20,7 +20,8 @@ import {
   PackageCheck,
   AlertTriangle,
   Package,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Link
 } from 'lucide-react';
 import { getSupabase } from '../lib/supabase';
 import { Material, Order, Profile } from '../types';
@@ -32,6 +33,8 @@ import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import SearchableMaterialSelect from './SearchableMaterialSelect';
+
 
 export default function Orders() {
   const { profile } = useAuth();
@@ -47,11 +50,22 @@ export default function Orders() {
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [orderToCancel, setOrderToCancel] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [bulkPurchaseOrder, setBulkPurchaseOrder] = useState('');
+  const [bulkInvoiceNumber, setBulkInvoiceNumber] = useState('');
+  const [bulkOrderValue, setBulkOrderValue] = useState('');
+  const [bulkDocumentType, setBulkDocumentType] = useState('PEDIDO');
+  const [bulkDocumentNumber, setBulkDocumentNumber] = useState('');
+  const [bulkPaymentMethod, setBulkPaymentMethod] = useState('');
+
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [startDate, setStartDate] = useState<string>(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState<string>(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [projectFilter, setProjectFilter] = useState<string>('ALL');
   const [supplierFilter, setSupplierFilter] = useState<string>('ALL');
+  const [purchaseOrderFilter, setPurchaseOrderFilter] = useState('');
+  const [invoiceNumberFilter, setInvoiceNumberFilter] = useState('');
 
   const [newOrder, setNewOrder] = useState({
     items: [{ material_id: '', quantity: 0 }],
@@ -63,6 +77,9 @@ export default function Orders() {
     apartment: '',
     observation: '',
     for_stock: false,
+    purchase_order: '',
+    invoice_number: '',
+    order_value: '',
   });
 
   const [purchaseData, setPurchaseData] = useState({
@@ -73,10 +90,22 @@ export default function Orders() {
     supplier: '',
     expected_delivery: '',
     pickup_employee_id: '',
+    purchase_order: '',
+    invoice_number: '',
+    order_value: '',
+    document_type: 'PEDIDO',
+    document_number: '',
+    payment_method: '',
   });
 
   const [receiveData, setReceiveData] = useState({
     received_by: profile?.name || profile?.email || '',
+    purchase_order: '',
+    invoice_number: '',
+    order_value: '',
+    document_type: 'PEDIDO',
+    document_number: '',
+    payment_method: '',
   });
 
   const safeFormatDate = (dateStr: string | null | undefined, formatStr: string = "dd/MM/yy") => {
@@ -170,6 +199,8 @@ export default function Orders() {
         apartment: newOrder.for_stock ? null : newOrder.apartment,
         observation: newOrder.observation,
         for_stock: newOrder.for_stock,
+        purchase_order: isAdmin ? (newOrder.purchase_order || null) : null,
+        invoice_number: isAdmin ? (newOrder.invoice_number || null) : null,
         status: 'PENDING'
       })));
       const ordersToInsert = validItems.map(item => ({
@@ -183,6 +214,8 @@ export default function Orders() {
         apartment: newOrder.for_stock ? null : newOrder.apartment,
         observation: newOrder.observation,
         for_stock: newOrder.for_stock,
+        purchase_order: isAdmin ? (newOrder.purchase_order || null) : null,
+        invoice_number: isAdmin ? (newOrder.invoice_number || null) : null,
         status: 'PENDING'
       }));
 
@@ -205,6 +238,9 @@ export default function Orders() {
           project: '',
           apartment: '',
           observation: '',
+          for_stock: false,
+          purchase_order: '',
+          invoice_number: '',
         });
       }
     } catch (err) {
@@ -225,20 +261,40 @@ export default function Orders() {
     try {
       const employee = employees.find(e => e.id === purchaseData.pickup_employee_id);
 
+      const docType = purchaseData.document_type || 'PEDIDO';
+      const docNum = purchaseData.document_number ? purchaseData.document_number.toUpperCase().trim() : '';
+
+      const updateData: any = {
+        status: purchaseData.delivery_type === 'PICKUP' ? 'AWAITING_PICKUP' : 'APPROVED',
+        quantity: purchaseData.quantity,
+        original_quantity: selectedOrder.quantity,
+        quantity_justification: purchaseData.quantity_justification,
+        delivery_type: purchaseData.delivery_type,
+        pickup_info: purchaseData.delivery_type === 'PICKUP' ? purchaseData.pickup_info : null,
+        pickup_by_id: purchaseData.delivery_type === 'PICKUP' ? purchaseData.pickup_employee_id : null,
+        pickup_by_name: purchaseData.delivery_type === 'PICKUP' ? employee?.full_name || null : null,
+        supplier: purchaseData.delivery_type === 'DELIVERY' ? purchaseData.supplier : null,
+        expected_delivery: purchaseData.delivery_type === 'DELIVERY' ? purchaseData.expected_delivery : null,
+        order_value: purchaseData.order_value ? parseFloat(purchaseData.order_value) : (selectedOrder.order_value || null),
+        document_type: docType,
+        document_number: docNum || selectedOrder.document_number || null,
+        payment_method: purchaseData.payment_method || selectedOrder.payment_method || null,
+      };
+
+      if (docNum) {
+        if (docType === 'PEDIDO') {
+          updateData.purchase_order = docNum;
+        } else {
+          updateData.invoice_number = docNum;
+        }
+      } else {
+        updateData.purchase_order = selectedOrder.purchase_order || null;
+        updateData.invoice_number = selectedOrder.invoice_number || null;
+      }
+
       const { error } = await getSupabase()
         .from('orders')
-        .update({
-          status: purchaseData.delivery_type === 'PICKUP' ? 'AWAITING_PICKUP' : 'APPROVED',
-          quantity: purchaseData.quantity,
-          original_quantity: selectedOrder.quantity,
-          quantity_justification: purchaseData.quantity_justification,
-          delivery_type: purchaseData.delivery_type,
-          pickup_info: purchaseData.delivery_type === 'PICKUP' ? purchaseData.pickup_info : null,
-          pickup_by_id: purchaseData.delivery_type === 'PICKUP' ? purchaseData.pickup_employee_id : null,
-          pickup_by_name: purchaseData.delivery_type === 'PICKUP' ? employee?.full_name || null : null,
-          supplier: purchaseData.delivery_type === 'DELIVERY' ? purchaseData.supplier : null,
-          expected_delivery: purchaseData.delivery_type === 'DELIVERY' ? purchaseData.expected_delivery : null,
-        })
+        .update(updateData)
         .eq('id', selectedOrder.id);
 
       if (error) {
@@ -281,12 +337,35 @@ export default function Orders() {
       // 1. Update status
       // O gatilho no banco de dados (trg_handle_order_stock_update) cuidará 
       // da atualização do estoque e log de movimentação apenas quando o status for RECEIVED.
+      const updatePayload: any = {
+        status: 'RECEIVED',
+        received_by: receiveData.received_by
+      };
+
+      if (isAdmin) {
+        const docType = receiveData.document_type || 'PEDIDO';
+        const docNum = receiveData.document_number ? receiveData.document_number.toUpperCase().trim() : '';
+
+        updatePayload.order_value = receiveData.order_value ? parseFloat(receiveData.order_value) : (selectedOrder.order_value || null);
+        updatePayload.document_type = docType;
+        updatePayload.document_number = docNum || selectedOrder.document_number || null;
+        updatePayload.payment_method = receiveData.payment_method || selectedOrder.payment_method || null;
+
+        if (docNum) {
+          if (docType === 'PEDIDO') {
+            updatePayload.purchase_order = docNum;
+          } else {
+            updatePayload.invoice_number = docNum;
+          }
+        } else {
+          updatePayload.purchase_order = selectedOrder.purchase_order || null;
+          updatePayload.invoice_number = selectedOrder.invoice_number || null;
+        }
+      }
+
       const { error: updateError } = await supabase
         .from('orders')
-        .update({
-          status: 'RECEIVED',
-          received_by: receiveData.received_by
-        })
+        .update(updatePayload)
         .eq('id', selectedOrder.id);
 
       if (updateError) throw updateError;
@@ -321,6 +400,62 @@ export default function Orders() {
     }
   };
 
+  const toggleOrderSelect = (id: string) => {
+    setSelectedOrderIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkUpdateOrders = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedOrderIds.length === 0) return;
+
+    try {
+      const updates: any = {};
+      const docType = bulkDocumentType || 'PEDIDO';
+      const docNum = bulkDocumentNumber ? bulkDocumentNumber.toUpperCase().trim() : '';
+
+      if (docNum) {
+        updates.document_type = docType;
+        updates.document_number = docNum;
+        if (docType === 'PEDIDO') {
+          updates.purchase_order = docNum;
+        } else {
+          updates.invoice_number = docNum;
+        }
+      }
+
+      if (bulkPaymentMethod) {
+        updates.payment_method = bulkPaymentMethod;
+      }
+
+      if (bulkOrderValue) {
+        updates.order_value = parseFloat(bulkOrderValue);
+      }
+
+      if (Object.keys(updates).length === 0) {
+        toast.error('Preencha pelo menos um campo para vincular.');
+        return;
+      }
+
+      const { error } = await getSupabase()
+        .from('orders')
+        .update(updates)
+        .in('id', selectedOrderIds);
+
+      if (error) {
+        toast.error('Erro ao vincular pedidos em massa: ' + error.message);
+      } else {
+        toast.success(`Vinculados ${selectedOrderIds.length} pedidos com sucesso!`);
+        setIsBulkModalOpen(false);
+        setSelectedOrderIds([]);
+        fetchData();
+      }
+    } catch (err) {
+      toast.error('Erro ao vincular pedidos: ' + (err as Error).message);
+    }
+  };
+
   const exportToExcel = () => {
     try {
       const filteredOrders = orders.filter(order => {
@@ -335,7 +470,12 @@ export default function Orders() {
         const currentSupplier = order.delivery_type === 'PICKUP' ? order.pickup_info : order.supplier;
         const matchesSupplier = supplierFilter === 'ALL' || currentSupplier === supplierFilter;
 
-        return isWithinDate && matchesStatus && matchesProject && matchesSupplier;
+        const matchesPurchaseOrder = !purchaseOrderFilter || 
+          order.purchase_order?.toLowerCase().includes(purchaseOrderFilter.toLowerCase());
+        const matchesInvoiceNumber = !invoiceNumberFilter || 
+          order.invoice_number?.toLowerCase().includes(invoiceNumberFilter.toLowerCase());
+
+        return isWithinDate && matchesStatus && matchesProject && matchesSupplier && matchesPurchaseOrder && matchesInvoiceNumber;
       });
 
       if (filteredOrders.length === 0) {
@@ -361,6 +501,8 @@ export default function Orders() {
         'Apartamento': o.apartment || '---',
         'Descrição': o.service_description || '---',
         'Observações': o.observation || '---',
+        'Pedido de Compra': o.purchase_order || '---',
+        'Nota Fiscal (NF)': o.invoice_number || '---',
         'Previsão Entrega': safeFormatDate(o.expected_delivery, 'dd/MM/yyyy'),
         'Recebido Por': o.received_by || '---'
       }));
@@ -389,7 +531,12 @@ export default function Orders() {
         const currentSupplier = order.delivery_type === 'PICKUP' ? order.pickup_info : order.supplier;
         const matchesSupplier = supplierFilter === 'ALL' || currentSupplier === supplierFilter;
 
-        return isWithinDate && matchesStatus && matchesProject && matchesSupplier;
+        const matchesPurchaseOrder = !purchaseOrderFilter || 
+          order.purchase_order?.toLowerCase().includes(purchaseOrderFilter.toLowerCase());
+        const matchesInvoiceNumber = !invoiceNumberFilter || 
+          order.invoice_number?.toLowerCase().includes(invoiceNumberFilter.toLowerCase());
+
+        return isWithinDate && matchesStatus && matchesProject && matchesSupplier && matchesPurchaseOrder && matchesInvoiceNumber;
       });
 
       if (filteredOrders.length === 0) {
@@ -414,6 +561,8 @@ export default function Orders() {
         o.material?.name || '---',
         `${o.quantity} ${o.material?.unit || ''}`,
         o.delivery_type === 'PICKUP' ? (o.pickup_info || '---') : (o.supplier || '---'),
+        o.purchase_order || '---',
+        o.invoice_number || '---',
         o.status === 'PENDING' ? 'Pendente' :
         o.status === 'APPROVED' ? 'Comprado' :
         o.status === 'AWAITING_PICKUP' ? 'Aguardando Retirada' :
@@ -427,14 +576,16 @@ export default function Orders() {
 
       autoTable(doc, {
         startY: 45,
-        head: [['Data', 'Material', 'Qtd', 'Fornecedor', 'Status', 'Obra', 'Descrição/Justificativa', 'Solicitante']],
+        head: [['Data', 'Material', 'Qtd', 'Fornecedor', 'Pedido', 'NF', 'Status', 'Obra', 'Descrição/Justificativa', 'Solicitante']],
         body: tableBody,
         theme: 'grid',
         headStyles: { fillColor: [20, 20, 20], fontSize: 9, fontStyle: 'bold' },
         styles: { fontSize: 8, cellPadding: 3 },
         columnStyles: {
-          3: { cellWidth: 35 }, // Fornecedor
-          6: { cellWidth: 60 }, // Descrição
+          3: { cellWidth: 30 }, // Fornecedor
+          4: { cellWidth: 20 }, // Pedido
+          5: { cellWidth: 20 }, // NF
+          8: { cellWidth: 45 }, // Descrição
         },
         alternateRowStyles: { fillColor: [245, 245, 245] }
       });
@@ -446,6 +597,9 @@ export default function Orders() {
       toast.error('Erro ao gerar PDF.');
     }
   };
+
+  const uniquePurchaseOrders = Array.from(new Set(orders.map(o => o.purchase_order).filter(Boolean))).sort();
+  const uniqueInvoiceNumbers = Array.from(new Set(orders.map(o => o.invoice_number).filter(Boolean))).sort();
 
   return (
     <div className="space-y-6">
@@ -532,6 +686,36 @@ export default function Orders() {
             ))}
           </select>
         </div>
+        {isAdmin && (
+          <>
+            <div className="flex-1 w-full hidden md:block">
+              <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1 ml-1">Filtro Pedido</label>
+              <select 
+                className="w-full px-4 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                value={purchaseOrderFilter}
+                onChange={(e) => setPurchaseOrderFilter(e.target.value)}
+              >
+                <option value="">Todos</option>
+                {uniquePurchaseOrders.map(po => (
+                  <option key={po} value={po}>{po}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1 w-full hidden md:block">
+              <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1 ml-1">Filtro Nota (NF)</label>
+              <select 
+                className="w-full px-4 py-2 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                value={invoiceNumberFilter}
+                onChange={(e) => setInvoiceNumberFilter(e.target.value)}
+              >
+                <option value="">Todas</option>
+                {uniqueInvoiceNumbers.map(inf => (
+                  <option key={inf} value={inf}>{inf}</option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Mobile Floating Action Button */}
@@ -590,7 +774,12 @@ export default function Orders() {
                 const currentSupplier = order.delivery_type === 'PICKUP' ? order.pickup_info : order.supplier;
                 const matchesSupplier = supplierFilter === 'ALL' || currentSupplier === supplierFilter;
 
-                return isWithinDate && matchesStatus && matchesProject && matchesSupplier;
+                const matchesPurchaseOrder = !purchaseOrderFilter || 
+                  order.purchase_order?.toLowerCase().includes(purchaseOrderFilter.toLowerCase());
+                const matchesInvoiceNumber = !invoiceNumberFilter || 
+                  order.invoice_number?.toLowerCase().includes(invoiceNumberFilter.toLowerCase());
+
+                return isWithinDate && matchesStatus && matchesProject && matchesSupplier && matchesPurchaseOrder && matchesInvoiceNumber;
               })
               .map((order) => (
               <OrderCard 
@@ -603,6 +792,9 @@ export default function Orders() {
                 }}
                 onPurchase={() => {
                   setSelectedOrder(order);
+                  const existingDocType = order.document_type || (order.purchase_order ? 'PEDIDO' : order.invoice_number ? 'NOTA_FISCAL' : 'PEDIDO');
+                  const existingDocNumber = order.document_number || order.purchase_order || order.invoice_number || '';
+                  
                   setPurchaseData({
                     quantity: order.quantity,
                     quantity_justification: '',
@@ -611,12 +803,29 @@ export default function Orders() {
                     supplier: '',
                     expected_delivery: '',
                     pickup_employee_id: '',
+                    purchase_order: order.purchase_order || '',
+                    invoice_number: order.invoice_number || '',
+                    order_value: order.order_value ? String(order.order_value) : '',
+                    document_type: existingDocType,
+                    document_number: existingDocNumber,
+                    payment_method: order.payment_method || '',
                   });
                   setIsPurchaseModalOpen(true);
                 }}
                 onReceive={() => {
                   setSelectedOrder(order);
-                  setReceiveData({ received_by: profile?.full_name || profile?.email || '' });
+                  const existingDocType = order.document_type || (order.purchase_order ? 'PEDIDO' : order.invoice_number ? 'NOTA_FISCAL' : 'PEDIDO');
+                  const existingDocNumber = order.document_number || order.purchase_order || order.invoice_number || '';
+
+                  setReceiveData({
+                    received_by: profile?.full_name || profile?.email || '',
+                    purchase_order: order.purchase_order || '',
+                    invoice_number: order.invoice_number || '',
+                    order_value: order.order_value ? String(order.order_value) : '',
+                    document_type: existingDocType,
+                    document_number: existingDocNumber,
+                    payment_method: order.payment_method || '',
+                  });
                   setIsReceiveModalOpen(true);
                 }}
                 onViewDetails={() => {
@@ -624,6 +833,8 @@ export default function Orders() {
                   setIsDetailsModalOpen(true);
                 }}
                 isAdmin={isAdmin} 
+                selected={selectedOrderIds.includes(order.id)}
+                onToggleSelect={() => toggleOrderSelect(order.id)}
               />
             ))}
             {orders.length === 0 && (
@@ -671,21 +882,16 @@ export default function Orders() {
                     <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end bg-neutral-50 p-4 rounded-2xl border border-neutral-100">
                       <div className="md:col-span-7">
                         <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1">Material</label>
-                        <select 
+                        <SearchableMaterialSelect
                           required
-                          className="w-full px-4 py-3 bg-white border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                          materials={materials}
                           value={item.material_id}
-                          onChange={(e) => {
+                          onChange={(id) => {
                             const newItems = [...newOrder.items];
-                            newItems[index].material_id = e.target.value;
+                            newItems[index].material_id = id;
                             setNewOrder({...newOrder, items: newItems});
                           }}
-                        >
-                          <option value="">Selecione...</option>
-                          {materials.map(m => (
-                            <option key={m.id} value={m.id}>{m.name} ({m.stock_quantity} {m.unit})</option>
-                          ))}
-                        </select>
+                        />
                       </div>
                       <div className="md:col-span-4">
                         <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-widest mb-1">Quantidade</label>
@@ -820,6 +1026,31 @@ export default function Orders() {
                     onChange={(e) => setNewOrder({...newOrder, observation: e.target.value.toUpperCase()})}
                   />
                 </div>
+
+                {isAdmin && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Pedido de Compra (Opcional)</label>
+                      <input 
+                        type="text" 
+                        placeholder="Ex: OC 12345"
+                        className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                        value={newOrder.purchase_order}
+                        onChange={(e) => setNewOrder({...newOrder, purchase_order: e.target.value.toUpperCase()})}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Nota Fiscal - NF (Opcional)</label>
+                      <input 
+                        type="text" 
+                        placeholder="Ex: NF 98765"
+                        className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                        value={newOrder.invoice_number}
+                        onChange={(e) => setNewOrder({...newOrder, invoice_number: e.target.value.toUpperCase()})}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div className="pt-4 shrink-0 pb-10 md:pb-0">
                   <button type="submit" className="w-full py-4 bg-neutral-900 text-white rounded-2xl font-bold hover:bg-neutral-800 transition-all shadow-lg shadow-neutral-200">
@@ -961,6 +1192,80 @@ export default function Orders() {
                   </div>
                 )}
 
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Tipo de Documento</label>
+                    <select
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                      value={purchaseData.document_type}
+                      onChange={(e) => {
+                        const newType = e.target.value;
+                        let newNum = '';
+                        if (selectedOrder) {
+                          if (newType === 'PEDIDO') {
+                            newNum = selectedOrder.purchase_order || '';
+                          } else if (newType === 'NOTA_FISCAL') {
+                            newNum = selectedOrder.invoice_number || '';
+                          } else if (newType === selectedOrder.document_type) {
+                            newNum = selectedOrder.document_number || '';
+                          }
+                        }
+                        setPurchaseData({
+                          ...purchaseData,
+                          document_type: newType,
+                          document_number: newNum
+                        });
+                      }}
+                    >
+                      <option value="PEDIDO">Pedido de Compra</option>
+                      <option value="NOTA_FISCAL">Nota Fiscal (NF)</option>
+                      <option value="REEMBOLSO">Reembolso</option>
+                      <option value="RECIBO">Recibo</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Número do Documento</label>
+                    <input 
+                      type="text" 
+                      placeholder={
+                        purchaseData.document_type === 'PEDIDO' ? 'Ex: OC 12345' :
+                        purchaseData.document_type === 'NOTA_FISCAL' ? 'Ex: NF 98765' :
+                        purchaseData.document_type === 'REEMBOLSO' ? 'Ex: REEMB 001' : 'Ex: REC 001'
+                      }
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                      value={purchaseData.document_number}
+                      onChange={(e) => setPurchaseData({...purchaseData, document_number: e.target.value.toUpperCase()})}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Forma de Pagamento</label>
+                    <select
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                      value={purchaseData.payment_method}
+                      onChange={(e) => setPurchaseData({...purchaseData, payment_method: e.target.value})}
+                    >
+                      <option value="">Selecione...</option>
+                      <option value="BOLETO">Boleto</option>
+                      <option value="DEPOSITO">Depósito</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Valor do Pedido / Material</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      min="0"
+                      placeholder="Ex: 150.00"
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                      value={purchaseData.order_value}
+                      onChange={(e) => setPurchaseData({...purchaseData, order_value: e.target.value})}
+                    />
+                  </div>
+                </div>
+
                 <div className="pt-4">
                   <button type="submit" className="w-full py-4 bg-neutral-900 text-white rounded-2xl font-bold hover:bg-neutral-800 transition-all shadow-lg shadow-neutral-200">
                     Confirmar Compra e Liberar
@@ -999,6 +1304,84 @@ export default function Orders() {
                     onChange={(e) => setReceiveData({...receiveData, received_by: e.target.value.toUpperCase()})}
                   />
                 </div>
+
+                {isAdmin && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Tipo de Documento</label>
+                        <select
+                          className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                          value={receiveData.document_type}
+                          onChange={(e) => {
+                            const newType = e.target.value;
+                            let newNum = '';
+                            if (selectedOrder) {
+                              if (newType === 'PEDIDO') {
+                                newNum = selectedOrder.purchase_order || '';
+                              } else if (newType === 'NOTA_FISCAL') {
+                                newNum = selectedOrder.invoice_number || '';
+                              } else if (newType === selectedOrder.document_type) {
+                                newNum = selectedOrder.document_number || '';
+                              }
+                            }
+                            setReceiveData({
+                              ...receiveData,
+                              document_type: newType,
+                              document_number: newNum
+                            });
+                          }}
+                        >
+                          <option value="PEDIDO">Pedido de Compra</option>
+                          <option value="NOTA_FISCAL">Nota Fiscal (NF)</option>
+                          <option value="REEMBOLSO">Reembolso</option>
+                          <option value="RECIBO">Recibo</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Número do Documento</label>
+                        <input 
+                          type="text" 
+                          placeholder={
+                            receiveData.document_type === 'PEDIDO' ? 'Ex: OC 12345' :
+                            receiveData.document_type === 'NOTA_FISCAL' ? 'Ex: NF 98765' :
+                            receiveData.document_type === 'REEMBOLSO' ? 'Ex: REEMB 001' : 'Ex: REC 001'
+                          }
+                          className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                          value={receiveData.document_number}
+                          onChange={(e) => setReceiveData({...receiveData, document_number: e.target.value.toUpperCase()})}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Forma de Pagamento</label>
+                        <select
+                          className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                          value={receiveData.payment_method}
+                          onChange={(e) => setReceiveData({...receiveData, payment_method: e.target.value})}
+                        >
+                          <option value="">Selecione...</option>
+                          <option value="BOLETO">Boleto</option>
+                          <option value="DEPOSITO">Depósito</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Valor do Pedido / Material</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          min="0"
+                          placeholder="Ex: 150.00"
+                          className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                          value={receiveData.order_value}
+                          onChange={(e) => setReceiveData({...receiveData, order_value: e.target.value})}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
                 <div className="pt-4">
                   <button type="submit" className="w-full py-4 bg-green-600 text-white rounded-2xl font-bold hover:bg-green-700 transition-all shadow-lg shadow-green-100">
                     Confirmar Recebimento
@@ -1232,6 +1615,51 @@ export default function Orders() {
                         </p>
                       </div>
                     )}
+                    {isAdmin && (selectedOrder.purchase_order || selectedOrder.invoice_number || selectedOrder.order_value || selectedOrder.document_type || selectedOrder.payment_method) && (
+                      <div className="pt-4 border-t border-neutral-200 grid grid-cols-2 gap-4">
+                        {selectedOrder.document_type ? (
+                          <div>
+                            <p className="text-xs text-neutral-500 mb-1">
+                              {selectedOrder.document_type === 'PEDIDO' ? 'Pedido de Compra' :
+                               selectedOrder.document_type === 'NOTA_FISCAL' ? 'Nota Fiscal (NF)' :
+                               selectedOrder.document_type === 'REEMBOLSO' ? 'Reembolso' : 'Recibo'}
+                            </p>
+                            <p className="font-bold text-neutral-900">{selectedOrder.document_number || 'Sem número'}</p>
+                          </div>
+                        ) : (
+                          <>
+                            {selectedOrder.purchase_order && (
+                              <div>
+                                <p className="text-xs text-neutral-500 mb-1">Pedido de Compra</p>
+                                <p className="font-bold text-neutral-900">{selectedOrder.purchase_order}</p>
+                              </div>
+                            )}
+                            {selectedOrder.invoice_number && (
+                              <div>
+                                <p className="text-xs text-neutral-500 mb-1">Nota Fiscal (NF)</p>
+                                <p className="font-bold text-neutral-900">{selectedOrder.invoice_number}</p>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        {selectedOrder.payment_method && (
+                          <div>
+                            <p className="text-xs text-neutral-500 mb-1">Forma de Pagamento</p>
+                            <span className="px-2.5 py-1 bg-neutral-100 text-neutral-800 text-[10px] font-black uppercase rounded-lg tracking-wider">
+                              {selectedOrder.payment_method}
+                            </span>
+                          </div>
+                        )}
+                        {selectedOrder.order_value !== undefined && selectedOrder.order_value !== null && (
+                          <div className="col-span-2 mt-2">
+                            <p className="text-xs text-neutral-500 mb-1">Valor do Pedido / Material</p>
+                            <p className="font-extrabold text-neutral-900 flex items-center gap-0.5">
+                              R$ {Number(selectedOrder.order_value).toFixed(2)}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1242,6 +1670,142 @@ export default function Orders() {
                   className="w-full py-4 bg-neutral-900 text-white rounded-2xl font-bold hover:bg-neutral-800 transition-all shadow-lg shadow-neutral-200"
                 >
                   Fechar Detalhes
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Bulk Link Modal */}
+        {isBulkModalOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-neutral-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-bold text-neutral-900 italic serif">Vincular em Massa</h3>
+                  <p className="text-xs text-neutral-500">{selectedOrderIds.length} pedidos selecionados</p>
+                </div>
+                <button 
+                  onClick={() => setIsBulkModalOpen(false)} 
+                  className="p-2 hover:bg-neutral-100 rounded-full transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+              <form onSubmit={handleBulkUpdateOrders} className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Tipo de Documento</label>
+                    <select
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                      value={bulkDocumentType}
+                      onChange={(e) => setBulkDocumentType(e.target.value)}
+                    >
+                      <option value="PEDIDO">Pedido de Compra</option>
+                      <option value="NOTA_FISCAL">Nota Fiscal (NF)</option>
+                      <option value="REEMBOLSO">Reembolso</option>
+                      <option value="RECIBO">Recibo</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Número do Documento</label>
+                    <input 
+                      type="text" 
+                      placeholder={
+                        bulkDocumentType === 'PEDIDO' ? 'Ex: OC 12345' :
+                        bulkDocumentType === 'NOTA_FISCAL' ? 'Ex: NF 98765' :
+                        bulkDocumentType === 'REEMBOLSO' ? 'Ex: REEMB 001' : 'Ex: REC 001'
+                      }
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                      value={bulkDocumentNumber}
+                      onChange={(e) => setBulkDocumentNumber(e.target.value.toUpperCase())}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Forma de Pagamento</label>
+                    <select
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 text-sm"
+                      value={bulkPaymentMethod}
+                      onChange={(e) => setBulkPaymentMethod(e.target.value)}
+                    >
+                      <option value="">Selecione...</option>
+                      <option value="BOLETO">Boleto</option>
+                      <option value="DEPOSITO">Depósito</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Valor do Pedido / Material</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      min="0"
+                      placeholder="Ex: 150.00"
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                      value={bulkOrderValue}
+                      onChange={(e) => setBulkOrderValue(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="pt-4 flex gap-3">
+                  <button 
+                    type="button"
+                    onClick={() => setIsBulkModalOpen(false)}
+                    className="flex-1 py-4 bg-neutral-100 text-neutral-600 rounded-2xl font-bold hover:bg-neutral-200 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="flex-1 py-4 bg-neutral-900 text-white rounded-2xl font-bold hover:bg-neutral-800 transition-all shadow-lg shadow-neutral-200 flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 size={20} />
+                    Confirmar Vínculo
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Floating Bottom Action Bar */}
+        {selectedOrderIds.length > 0 && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[50] w-[calc(100%-2rem)] max-w-xl">
+            <motion.div 
+              initial={{ y: 80, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 80, opacity: 0 }}
+              className="bg-black/95 backdrop-blur-md text-white px-6 py-4 rounded-[2rem] shadow-2xl flex items-center justify-between border border-neutral-800"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-neutral-800 flex items-center justify-center font-bold text-sm">
+                  {selectedOrderIds.length}
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-neutral-400">Selecionados</p>
+                  <p className="text-[10px] text-neutral-500">Pronto para vincular em massa</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setSelectedOrderIds([])}
+                  className="px-4 py-2 hover:bg-neutral-800 rounded-xl text-xs font-bold transition-all text-neutral-400 hover:text-white"
+                >
+                  Limpar
+                </button>
+                <button 
+                  onClick={() => setIsBulkModalOpen(true)}
+                  className="px-5 py-2.5 bg-white text-black hover:bg-neutral-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+                >
+                  <Link size={14} />
+                  Vincular
                 </button>
               </div>
             </motion.div>
@@ -1260,9 +1824,21 @@ interface OrderCardProps {
   onViewDetails: () => void;
   isAdmin: boolean;
   safeFormatDate: (dateStr: string | null | undefined) => string;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }
 
-const OrderCard: React.FC<OrderCardProps> = ({ order, onCancel, onPurchase, onReceive, onViewDetails, isAdmin, safeFormatDate }) => {
+const OrderCard: React.FC<OrderCardProps> = ({ 
+  order, 
+  onCancel, 
+  onPurchase, 
+  onReceive, 
+  onViewDetails, 
+  isAdmin, 
+  safeFormatDate,
+  selected,
+  onToggleSelect
+}) => {
   const statusConfig = {
     PENDING: { label: 'Pendente', color: 'bg-neutral-100 text-neutral-600', icon: Clock },
     APPROVED: { label: 'Comprado', color: 'bg-blue-100 text-blue-600', icon: Truck },
@@ -1285,6 +1861,16 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, onCancel, onPurchase, onRe
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3 md:gap-4">
+          {isAdmin && onToggleSelect && (
+            <div onClick={(e) => e.stopPropagation()} className="flex items-center justify-center mr-1">
+              <input 
+                type="checkbox"
+                checked={selected || false}
+                onChange={onToggleSelect}
+                className="w-5 h-5 rounded-lg border-neutral-300 text-neutral-900 focus:ring-neutral-900 cursor-pointer"
+              />
+            </div>
+          )}
           <div className={cn("p-3 md:p-4 rounded-2xl shrink-0", config.color)}>
             <StatusIcon size={24} className="md:w-8 md:h-8" />
           </div>
@@ -1377,6 +1963,20 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, onCancel, onPurchase, onRe
                     <span className="text-neutral-500 text-[10px]">({safeFormatDate(order.expected_delivery)})</span>
                   )}
                 </div>
+                {isAdmin && (order.purchase_order || order.invoice_number) && (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {order.purchase_order && (
+                      <span className="px-1.5 py-0.5 bg-neutral-50 text-[9px] font-bold border border-neutral-200 rounded text-neutral-600">
+                        PED: {order.purchase_order}
+                      </span>
+                    )}
+                    {order.invoice_number && (
+                      <span className="px-1.5 py-0.5 bg-neutral-50 text-[9px] font-bold border border-neutral-200 rounded text-neutral-600">
+                        NF: {order.invoice_number}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}

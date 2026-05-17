@@ -12,6 +12,7 @@ import Employees from './components/Employees';
 import Confirmations from './components/Confirmations';
 import Projects from './components/Projects';
 import Login from './components/Login';
+import Invoices from './components/Invoices';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 
 function AppContent() {
@@ -39,6 +40,7 @@ function AppContent() {
         <Route path="/equipamentos" element={<Equipment />} />
         <Route path="/confirmacoes" element={<Confirmations />} />
         <Route path="/servicos" element={<Services />} />
+        <Route path="/notas" element={<Invoices />} />
         <Route path="/funcionarios" element={<Employees />} />
         <Route path="/empreendimentos" element={<Projects />} />
         <Route path="/relatorios" element={<Reports />} />
