@@ -21,10 +21,11 @@ import {
   AlertTriangle,
   Package,
   FileSpreadsheet,
-  Link
+  Link,
+  Pencil
 } from 'lucide-react';
 import { getSupabase } from '../lib/supabase';
-import { Material, Order, Profile } from '../types';
+import { Material, Order, Profile, Supplier, Project } from '../types';
 import { cn } from '../lib/utils';
 import { format, parseISO, isWithinInterval, startOfMonth, endOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -42,13 +43,24 @@ export default function Orders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [employees, setEmployees] = useState<Profile[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
   const [isReceiveModalOpen, setIsReceiveModalOpen] = useState(false);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [orderToCancel, setOrderToCancel] = useState<string | null>(null);
+  const [cancelJustification, setCancelJustification] = useState('');
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [editOrderData, setEditOrderData] = useState({
+    id: '',
+    material_id: '',
+    quantity: 0,
+    project: '',
+    edit_justification: ''
+  });
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
@@ -129,10 +141,12 @@ export default function Orders() {
         ordersQuery = ordersQuery.eq('requested_by_id', profile.id);
       }
 
-      const [ordersRes, materialsRes, profilesRes] = await Promise.all([
+      const [ordersRes, materialsRes, profilesRes, suppliersRes, projectsRes] = await Promise.all([
         ordersQuery,
         supabase.from('materials').select('*').order('name', { ascending: true }),
-        supabase.from('profiles').select('*').order('full_name', { ascending: true })
+        supabase.from('profiles').select('*').order('full_name', { ascending: true }),
+        supabase.from('suppliers').select('*').order('name', { ascending: true }),
+        supabase.from('projects').select('*').order('name', { ascending: true })
       ]);
 
       if (ordersRes.error) {
@@ -153,6 +167,20 @@ export default function Orders() {
         console.error('Error fetching profiles:', profilesRes.error);
       } else {
         setEmployees(profilesRes.data || []);
+      }
+
+      if (suppliersRes.error) {
+        console.error('Error fetching suppliers:', suppliersRes.error);
+        toast.error('Erro ao buscar fornecedores.');
+      } else {
+        setSuppliers(suppliersRes.data || []);
+      }
+
+      if (projectsRes.error) {
+        console.error('Error fetching projects:', projectsRes.error);
+        toast.error('Erro ao buscar empreendimentos.');
+      } else {
+        setProjects(projectsRes.data || []);
       }
     } catch (err) {
       console.error('Supabase initialization error:', err);
@@ -273,8 +301,8 @@ export default function Orders() {
         pickup_info: purchaseData.delivery_type === 'PICKUP' ? purchaseData.pickup_info : null,
         pickup_by_id: purchaseData.delivery_type === 'PICKUP' ? purchaseData.pickup_employee_id : null,
         pickup_by_name: purchaseData.delivery_type === 'PICKUP' ? employee?.full_name || null : null,
-        supplier: purchaseData.delivery_type === 'DELIVERY' ? purchaseData.supplier : null,
-        expected_delivery: purchaseData.delivery_type === 'DELIVERY' ? purchaseData.expected_delivery : null,
+        supplier: purchaseData.supplier || null,
+        expected_delivery: purchaseData.expected_delivery || null,
         order_value: purchaseData.order_value ? parseFloat(purchaseData.order_value) : (selectedOrder.order_value || null),
         document_type: docType,
         document_number: docNum || selectedOrder.document_number || null,
@@ -311,7 +339,8 @@ export default function Orders() {
               if (!phoneStr.startsWith('55') && phoneStr.length <= 11) {
                 phoneStr = '55' + phoneStr;
               }
-              const message = `Olá, *${employee.full_name || 'Equipe'}*,\n\nUma nova retirada de material foi agendada. Seguem os detalhes:\n\nMaterial: ${purchaseData.quantity} ${selectedOrder.material?.unit} de ${selectedOrder.material?.name}\nLocal de retirada: ${purchaseData.pickup_info}\nLocal de entrega: Obra ${selectedOrder.project}\nSolicitante: ${selectedOrder.requested_by}`;
+              const dataRetiradaText = purchaseData.expected_delivery ? `\nData de retirada: ${safeFormatDate(purchaseData.expected_delivery, 'dd/MM/yyyy')}` : '';
+              const message = `Olá, *${employee.full_name || 'Equipe'}*,\n\nUma nova retirada de material foi agendada. Seguem os detalhes:\n\nMaterial: ${purchaseData.quantity} ${selectedOrder.material?.unit} de ${selectedOrder.material?.name}\nLocal de retirada: ${purchaseData.pickup_info}${dataRetiradaText}\nLocal de entrega: Obra ${selectedOrder.project}\nSolicitante: ${selectedOrder.requested_by}`;
               const whatsappUrl = `https://wa.me/${phoneStr}?text=${encodeURIComponent(message)}`;
               window.open(whatsappUrl, '_blank');
             } else {
@@ -380,11 +409,15 @@ export default function Orders() {
 
   const cancelOrder = async () => {
     if (!orderToCancel || !isAdmin) return;
+    if (!cancelJustification.trim()) {
+      toast.error('Informe o motivo do cancelamento.');
+      return;
+    }
 
     try {
       const { error } = await getSupabase()
         .from('orders')
-        .update({ status: 'CANCELLED' })
+        .update({ status: 'CANCELLED', cancel_justification: cancelJustification.trim().toUpperCase() })
         .eq('id', orderToCancel);
 
       if (error) {
@@ -393,10 +426,42 @@ export default function Orders() {
         toast.success('Pedido cancelado com sucesso!');
         setIsCancelModalOpen(false);
         setOrderToCancel(null);
+        setCancelJustification('');
         fetchData();
       }
     } catch (err) {
       toast.error('Erro de configuração: ' + (err as Error).message);
+    }
+  };
+
+  const handleEditOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isAdmin || !editOrderData.id) return;
+    if (!editOrderData.edit_justification.trim()) {
+      toast.error('Informe a justificativa da edição.');
+      return;
+    }
+
+    try {
+      const updatePayload: Record<string, unknown> = {
+        edit_justification: editOrderData.edit_justification.trim().toUpperCase(),
+      };
+      if (editOrderData.material_id) updatePayload.material_id = editOrderData.material_id;
+      if (editOrderData.quantity > 0) updatePayload.quantity = editOrderData.quantity;
+      if (editOrderData.project) updatePayload.project = editOrderData.project.toUpperCase();
+
+      const { error } = await getSupabase()
+        .from('orders')
+        .update(updatePayload)
+        .eq('id', editOrderData.id);
+
+      if (error) throw error;
+      toast.success('Pedido atualizado com sucesso!');
+      setIsEditModalOpen(false);
+      setEditOrderData({ id: '', material_id: '', quantity: 0, project: '', edit_justification: '' });
+      fetchData();
+    } catch (err) {
+      toast.error('Erro ao editar pedido: ' + (err as Error).message);
     }
   };
 
@@ -489,7 +554,7 @@ export default function Orders() {
         'Material': o.material?.name || '---',
         'Quantidade': o.quantity,
         'Unidade': o.material?.unit || '---',
-        'Fornecedor / Local Retirada': o.delivery_type === 'PICKUP' ? (o.pickup_info || '---') : (o.supplier || '---'),
+        'Fornecedor / Local Retirada': o.delivery_type === 'PICKUP' ? (o.supplier || o.pickup_info || '---') : (o.supplier || '---'),
         'Status': o.status === 'PENDING' ? 'Pendente' :
                   o.status === 'APPROVED' ? 'Comprado' :
                   o.status === 'AWAITING_PICKUP' ? 'Aguardando Retirada' :
@@ -560,7 +625,7 @@ export default function Orders() {
         safeFormatDate(o.created_at, 'dd/MM/yy'),
         o.material?.name || '---',
         `${o.quantity} ${o.material?.unit || ''}`,
-        o.delivery_type === 'PICKUP' ? (o.pickup_info || '---') : (o.supplier || '---'),
+        o.delivery_type === 'PICKUP' ? (o.supplier || o.pickup_info || '---') : (o.supplier || '---'),
         o.purchase_order || '---',
         o.invoice_number || '---',
         o.status === 'PENDING' ? 'Pendente' :
@@ -788,7 +853,18 @@ export default function Orders() {
                 safeFormatDate={safeFormatDate}
                 onCancel={() => {
                   setOrderToCancel(order.id);
+                  setCancelJustification('');
                   setIsCancelModalOpen(true);
+                }}
+                onEdit={() => {
+                  setEditOrderData({
+                    id: order.id,
+                    material_id: order.material_id || '',
+                    quantity: order.quantity,
+                    project: order.project || '',
+                    edit_justification: ''
+                  });
+                  setIsEditModalOpen(true);
                 }}
                 onPurchase={() => {
                   setSelectedOrder(order);
@@ -996,13 +1072,17 @@ export default function Orders() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Empreendimento</label>
-                      <input 
+                      <select 
                         required
-                        type="text" 
-                        className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                        className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 uppercase"
                         value={newOrder.project}
-                        onChange={(e) => setNewOrder({...newOrder, project: e.target.value.toUpperCase()})}
-                      />
+                        onChange={(e) => setNewOrder({...newOrder, project: e.target.value})}
+                      >
+                        <option value="">Selecione um empreendimento...</option>
+                        {projects.map(p => (
+                          <option key={p.id} value={p.name}>{p.name}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Apartamento / Local</label>
@@ -1144,13 +1224,17 @@ export default function Orders() {
                   <>
                     <div>
                       <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Fornecedora</label>
-                      <input 
+                      <select 
                         required
-                        type="text" 
-                        className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                        className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 uppercase"
                         value={purchaseData.supplier}
-                        onChange={(e) => setPurchaseData({...purchaseData, supplier: e.target.value.toUpperCase()})}
-                      />
+                        onChange={(e) => setPurchaseData({...purchaseData, supplier: e.target.value})}
+                      >
+                        <option value="">Selecione um fornecedor...</option>
+                        {suppliers.map(s => (
+                          <option key={s.id} value={s.name}>{s.name}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Previsão de Entrega</label>
@@ -1166,10 +1250,40 @@ export default function Orders() {
                 ) : (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Informações para Retirada (Local, Instruções...)</label>
-                      <textarea 
+                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Fornecedor</label>
+                      <select 
                         required
-                        rows={3}
+                        className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 uppercase"
+                        value={purchaseData.supplier}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const sup = suppliers.find(s => s.name === val);
+                          setPurchaseData(prev => ({
+                            ...prev, 
+                            supplier: val,
+                            pickup_info: sup?.address && !prev.pickup_info ? sup.address.toUpperCase() : prev.pickup_info
+                          }));
+                        }}
+                      >
+                        <option value="">Selecione um fornecedor...</option>
+                        {suppliers.map(s => (
+                          <option key={s.id} value={s.name}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Data de Retirada (Opcional)</label>
+                      <input 
+                        type="date" 
+                        className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                        value={purchaseData.expected_delivery}
+                        onChange={(e) => setPurchaseData({...purchaseData, expected_delivery: e.target.value})}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Endereço e Fornecedor (Opcional)</label>
+                      <textarea 
+                        rows={2}
                         className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
                         value={purchaseData.pickup_info}
                         onChange={(e) => setPurchaseData({...purchaseData, pickup_info: e.target.value.toUpperCase()})}
@@ -1397,32 +1511,140 @@ export default function Orders() {
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-8 text-center"
+              className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
             >
-              <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                <AlertTriangle size={32} />
+              <div className="p-6 border-b border-neutral-100 flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center">
+                  <AlertTriangle size={22} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-neutral-900 italic serif">Cancelar Pedido</h3>
+                  <p className="text-xs text-neutral-500">Esta ação não pode ser desfeita.</p>
+                </div>
               </div>
-              <h3 className="text-xl font-bold text-neutral-900 mb-2 italic serif">Cancelar Pedido</h3>
-              <p className="text-neutral-500 text-sm mb-8">
-                Tem certeza que deseja cancelar este pedido? Esta ação não pode ser desfeita.
-              </p>
-              <div className="flex flex-col gap-3">
-                <button 
-                  onClick={cancelOrder}
-                  className="w-full py-4 bg-red-600 text-white rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-100"
-                >
-                  Sim, Cancelar Pedido
-                </button>
-                <button 
-                  onClick={() => {
-                    setIsCancelModalOpen(false);
-                    setOrderToCancel(null);
-                  }}
-                  className="w-full py-4 bg-neutral-100 text-neutral-600 rounded-2xl font-bold hover:bg-neutral-200 transition-all"
-                >
-                  Voltar
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Motivo do Cancelamento <span className="text-red-500">*</span></label>
+                  <textarea
+                    rows={3}
+                    placeholder="Descreva o motivo do cancelamento..."
+                    className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 uppercase resize-none"
+                    value={cancelJustification}
+                    onChange={(e) => setCancelJustification(e.target.value.toUpperCase())}
+                  />
+                </div>
+                <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={cancelOrder}
+                    disabled={!cancelJustification.trim()}
+                    className="w-full py-4 bg-red-600 text-white rounded-2xl font-bold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-red-100"
+                  >
+                    Confirmar Cancelamento
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setIsCancelModalOpen(false);
+                      setOrderToCancel(null);
+                      setCancelJustification('');
+                    }}
+                    className="w-full py-4 bg-neutral-100 text-neutral-600 rounded-2xl font-bold hover:bg-neutral-200 transition-all"
+                  >
+                    Voltar
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {isEditModalOpen && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-6 border-b border-neutral-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center">
+                    <Pencil size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-neutral-900 italic serif">Editar Pedido</h3>
+                    <p className="text-xs text-neutral-500">Correção de dados — justificativa obrigatória</p>
+                  </div>
+                </div>
+                <button onClick={() => setIsEditModalOpen(false)} className="p-2 hover:bg-neutral-100 rounded-full transition-colors">
+                  <X size={22} />
                 </button>
               </div>
+              <form onSubmit={handleEditOrder} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Material</label>
+                  <select
+                    className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                    value={editOrderData.material_id}
+                    onChange={(e) => setEditOrderData({...editOrderData, material_id: e.target.value})}
+                  >
+                    <option value="">Manter material atual</option>
+                    {materials.map(m => (
+                      <option key={m.id} value={m.id}>{m.name} ({m.unit})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Empreendimento</label>
+                    <select
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                      value={editOrderData.project}
+                      onChange={(e) => setEditOrderData({...editOrderData, project: e.target.value})}
+                    >
+                      <option value="">Manter atual</option>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Quantidade</label>
+                    <input
+                      type="number"
+                      min="1"
+                      className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900"
+                      value={editOrderData.quantity || ''}
+                      onChange={(e) => setEditOrderData({...editOrderData, quantity: Number(e.target.value)})}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-1">Justificativa da Edição <span className="text-red-500">*</span></label>
+                  <textarea
+                    required
+                    rows={3}
+                    placeholder="Descreva o motivo da correção..."
+                    className="w-full px-4 py-3 bg-neutral-50 border border-neutral-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-neutral-900 uppercase resize-none"
+                    value={editOrderData.edit_justification}
+                    onChange={(e) => setEditOrderData({...editOrderData, edit_justification: e.target.value.toUpperCase()})}
+                  />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="flex-1 py-3 bg-neutral-100 text-neutral-700 rounded-2xl font-bold hover:bg-neutral-200 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!editOrderData.edit_justification.trim()}
+                    className="flex-1 py-3 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-100"
+                  >
+                    Salvar Alterações
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}
@@ -1431,8 +1653,7 @@ export default function Orders() {
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
-            >
+              className="bg-white w-full max-w-2xl rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
               <div className="p-6 md:p-8 border-b border-neutral-100 flex justify-between items-center bg-neutral-50/50">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-neutral-900 text-white rounded-xl flex items-center justify-center">
@@ -1819,6 +2040,7 @@ export default function Orders() {
 interface OrderCardProps {
   order: Order;
   onCancel: () => void;
+  onEdit: () => void;
   onPurchase: () => void;
   onReceive: () => void;
   onViewDetails: () => void;
@@ -1831,6 +2053,7 @@ interface OrderCardProps {
 const OrderCard: React.FC<OrderCardProps> = ({ 
   order, 
   onCancel, 
+  onEdit,
   onPurchase, 
   onReceive, 
   onViewDetails, 
@@ -1890,6 +2113,24 @@ const OrderCard: React.FC<OrderCardProps> = ({
         </div>
         
         <div className="flex gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+          {isAdmin && order.status !== 'CANCELLED' && order.status !== 'RECEIVED' && (
+            <button 
+              onClick={onEdit}
+              title="Editar pedido"
+              className="p-1.5 md:p-2 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+            >
+              <Pencil size={16} />
+            </button>
+          )}
+          {isAdmin && order.status !== 'CANCELLED' && order.status !== 'RECEIVED' && (
+            <button 
+              onClick={onCancel}
+              title="Cancelar pedido"
+              className="p-1.5 md:p-2 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+            >
+              <XCircle size={16} />
+            </button>
+          )}
           {order.status === 'PENDING' && isAdmin && (
             <button 
               onClick={onPurchase}

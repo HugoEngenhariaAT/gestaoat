@@ -77,12 +77,24 @@ export interface ServiceRecord {
   provider?: Provider;
 }
 
+export interface Supplier {
+  id: string;
+  name: string;
+  address?: string;
+  salesperson?: string;
+  contact?: string;
+  supplier_type?: string;
+  created_at: string;
+}
+
 export interface Order {
   id: string;
   material_id: string;
   quantity: number;
   original_quantity?: number;
   quantity_justification?: string;
+  edit_justification?: string;
+  cancel_justification?: string;
   status: 'PENDING' | 'APPROVED' | 'AWAITING_PICKUP' | 'PICKED_UP' | 'AWAITING_DELIVERY' | 'DELIVERED' | 'RECEIVED' | 'CANCELLED';
   requested_by: string;
   requested_by_id?: string;

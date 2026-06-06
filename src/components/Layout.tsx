@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, ArrowLeftRight, HardHat, FileBarChart, ShoppingCart, Menu, X, Wrench, DollarSign, LogOut, User as UserIcon, Key, CheckCircle2, Building2, FileText } from 'lucide-react';
+import { LayoutDashboard, Package, ArrowLeftRight, HardHat, FileBarChart, ShoppingCart, Menu, X, Wrench, DollarSign, LogOut, User as UserIcon, Key, CheckCircle2, Building2, FileText, Truck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../lib/AuthContext';
 import { getSupabase } from '../lib/supabase';
@@ -103,6 +103,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Serviços', path: '/servicos', icon: HardHat },
     { name: 'Notas Fiscais', path: '/notas', icon: FileText, roles: ['DEV', 'ADMIN'] },
     { name: 'Empreendimentos', path: '/empreendimentos', icon: Building2, roles: ['DEV', 'ADMIN'] },
+    { name: 'Fornecedores', path: '/fornecedores', icon: Truck, roles: ['DEV', 'ADMIN'] },
     { name: 'Funcionários', path: '/funcionarios', icon: UserIcon, roles: ['DEV', 'ADMIN'] },
     { name: 'Relatórios', path: '/relatorios', icon: FileBarChart, roles: ['DEV', 'ADMIN'] },
   ];
